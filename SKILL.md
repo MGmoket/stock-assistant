@@ -15,6 +15,7 @@ requires:
 
 > **⚠️ 重要**：首次使用本 Skill 前，必须先运行 `bash setup.sh` 完成环境安装。
 > 每次运行脚本前，必须先激活 venv：`source .venv/bin/activate`。
+> **首次对话时**，请先询问用户的总资金量，并运行 `portfolio.py set-capital --amount 金额` 设置。
 
 ## 环境准备
 
@@ -152,6 +153,12 @@ python3 scripts/portfolio.py history
 
 # 查看盈亏分析
 python3 scripts/portfolio.py pnl
+
+# 设置总资金（首次使用时必须设置）
+python3 scripts/portfolio.py set-capital --amount 100000
+
+# 查看当前总资金
+python3 scripts/portfolio.py get-capital
 ```
 
 ## 使用规范
@@ -253,8 +260,8 @@ python3 scripts/stock_screener.py preset --name ice_reversal
 ### 16. 一键交易计划 (`plan` — 核心命令)
 
 ```bash
-# 自动选股 + 计算条件单参数 + 持仓检查
-python3 scripts/trading_strategy.py plan --capital 100000
+# 自动选股 + 计算条件单参数 + 持仓检查（自动读取已配置资金）
+python3 scripts/trading_strategy.py plan
 
 # 加入外部候选（从其他渠道发现的票）
 python3 scripts/trading_strategy.py plan --capital 100000 --extra 000858,600519

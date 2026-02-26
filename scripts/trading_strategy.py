@@ -364,7 +364,7 @@ def _check_positions(capital: float, risk_pct: float) -> list:
     return alerts
 
 
-def display_plan(capital: float = 30000, risk_pct: float = RISK_PER_TRADE_PCT,
+def display_plan(capital: float = 0, risk_pct: float = RISK_PER_TRADE_PCT,
                  extra_symbols: list = None, strategy: str = "short_term",
                  count: int = 3):
     """
@@ -374,6 +374,16 @@ def display_plan(capital: float = 30000, risk_pct: float = RISK_PER_TRADE_PCT,
       Section 3: 详细分析报告
     """
     from stock_screener import run_preset
+
+    # 自动读取总资金
+    if capital <= 0:
+        from portfolio import get_capital
+        capital = get_capital()
+    if capital <= 0:
+        print("\n  ❌ 未设置总资金，无法计算仓位。")
+        print("  请先运行: python3 scripts/portfolio.py set-capital --amount 金额")
+        print("  或传入: python3 scripts/trading_strategy.py plan --capital 金额")
+        return
 
     print(f"\n{'━' * 55}")
     print(f"  📋 交易计划 (资金: {format_price(capital)} | 风险: {risk_pct*100:.0f}%)")
@@ -482,7 +492,8 @@ def main():
     p_bat.add_argument("--risk-pct", type=float, default=RISK_PER_TRADE_PCT)
 
     p_plan = sub.add_parser("plan", help="一键生成交易计划（条件单在前 + 持仓检查 + 详细报告）")
-    p_plan.add_argument("--capital", type=float, default=30000)
+    p_plan.add_argument("--capital", type=float, default=0,
+                        help="可用资金（不传则自动读取已配置的总资金）")
     p_plan.add_argument("--risk-pct", type=float, default=RISK_PER_TRADE_PCT)
     p_plan.add_argument("--strategy", default="short_term",
                         help="选股策略 (short_term/leader_first_board/trend_pullback)")

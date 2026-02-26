@@ -26,7 +26,21 @@ def _load_portfolio() -> dict:
     if PORTFOLIO_FILE.exists():
         with open(PORTFOLIO_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    return {"positions": {}, "history": [], "cash_record": []}
+    return {"positions": {}, "history": [], "cash_record": [], "capital": 0}
+
+
+def get_capital() -> float:
+    """读取已配置的总资金（供其他模块调用）。"""
+    data = _load_portfolio()
+    return float(data.get("capital", 0))
+
+
+def set_capital(amount: float):
+    """设置总资金。"""
+    data = _load_portfolio()
+    data["capital"] = amount
+    _save_portfolio(data)
+    print(f"  ✅ 总资金已设置为 ¥{amount:,.2f}")
 
 
 def _save_portfolio(data: dict):
@@ -304,6 +318,11 @@ def main():
     sub.add_parser("history", help="交易历史")
     sub.add_parser("pnl", help="盈亏分析")
 
+    p_cap = sub.add_parser("set-capital", help="设置总资金")
+    p_cap.add_argument("--amount", type=float, required=True, help="总资金金额")
+
+    sub.add_parser("get-capital", help="查看当前总资金")
+
     args = parser.parse_args()
 
     if args.action == "summary":
@@ -316,6 +335,14 @@ def main():
         display_history()
     elif args.action == "pnl":
         display_pnl()
+    elif args.action == "set-capital":
+        set_capital(args.amount)
+    elif args.action == "get-capital":
+        cap = get_capital()
+        if cap > 0:
+            print(f"  💰 当前总资金: ¥{cap:,.2f}")
+        else:
+            print("  ⚠️ 尚未设置总资金，请运行: portfolio.py set-capital --amount 金额")
     else:
         parser.print_help()
 
