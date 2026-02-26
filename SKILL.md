@@ -158,14 +158,60 @@ python3 scripts/portfolio.py pnl
 
 1. **始终先激活 conda 环境**再运行脚本
 2. **股票代码格式**：6 位数字，如 `600519`（贵州茅台）、`000858`（五粮液）
-3. 所有数据来自 AkShare 免费接口，交易时段数据更新可能有延迟
+3. 所有数据来自免费接口（Sina + pytdx 通达信），交易时段数据更新可能有延迟
 4. **交易建议仅供参考**，用户需自行判断并在东方财富手动执行交易
 5. 默认过滤 ST 股票，仅展示主板股票
+
+### 9. 分钟级行情 (`scripts/tdx_data.py`)
+
+```bash
+# 5分钟K线
+python3 scripts/tdx_data.py minute --symbol 600519 --period 5min --count 20
+
+# 1分钟K线
+python3 scripts/tdx_data.py minute --symbol 600519 --period 1min --count 30
+
+# 五档盘口
+python3 scripts/tdx_data.py orderbook --symbol 600519
+
+# 分时成交明细（含大单标记）
+python3 scripts/tdx_data.py ticks --symbol 600519 --count 30
+
+# 批量实时行情
+python3 scripts/tdx_data.py batch-quotes --symbols 600519,000858,601318
+```
+
+### 10. 交割单导入 (`scripts/trade_import.py`)
+
+```bash
+# 导入东方财富交割单 CSV
+python3 scripts/trade_import.py import --file 交割单.csv --format eastmoney
+
+# 导入通达信交割单
+python3 scripts/trade_import.py import --file 交割单.csv --format tdx
+
+# 预览导入内容（不实际写入）
+python3 scripts/trade_import.py preview --file 交割单.csv --format eastmoney
+```
+
+### 11. 每日复盘 (`scripts/daily_review.py`)
+
+```bash
+# 生成今日复盘报告
+python3 scripts/daily_review.py review
+
+# 指定日期复盘
+python3 scripts/daily_review.py review --date 2026-02-26
+```
 
 ## 常见对话场景
 
 - "帮我看看贵州茅台最近的走势"→ 使用行情查询 + 技术面分析
+- "看看茅台的5分钟K线"→ 使用分钟级行情
+- "茅台现在的盘口是什么样？"→ 使用五档盘口
 - "今天哪些板块资金流入最多？"→ 使用资金流向模块
 - "推荐几只适合短线操作的股票"→ 使用选股引擎 + 交易策略
 - "我刚买了 100 股茅台，帮我记录一下"→ 使用持仓管理
-- "看看我的持仓现在盈亏情况"→ 使用持仓管理
+- "导入我的交割单"→ 使用交割单导入
+- "帮我做个今日复盘"→ 使用每日复盘
+
