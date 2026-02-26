@@ -48,29 +48,44 @@ def get_sector_capital_flow() -> pd.DataFrame:
     try:
         df = ak.stock_sector_fund_flow_rank(indicator="今日", sector_type="行业资金流")
         return df.head(20)
-    except Exception as e:
-        print(f"  ⚠️ 获取板块资金流向失败: {e}")
-        return pd.DataFrame()
+    except Exception:
+        # push2 被代理阻断时的备用方案
+        try:
+            df = ak.stock_board_industry_summary_ths()
+            if not df.empty and "涨跌幅" in df.columns:
+                df["涨跌幅"] = pd.to_numeric(df["涨跌幅"], errors="coerce")
+                df = df.sort_values("涨跌幅", ascending=False)
+            return df.head(20)
+        except Exception as e:
+            print(f"  ⚠️ 获取板块资金流向失败: {e}")
+            return pd.DataFrame()
 
 
 def get_northbound_flow() -> dict:
     """获取北向资金数据。"""
-    try:
-        # 沪股通
-        df_sh = ak.stock_hsgt_north_net_flow_in_em(symbol="沪股通")
-        # 深股通
-        df_sz = ak.stock_hsgt_north_net_flow_in_em(symbol="深股通")
-        result = {}
-        if not df_sh.empty:
-            latest_sh = df_sh.iloc[-1].to_dict()
-            result["沪股通"] = latest_sh
-        if not df_sz.empty:
-            latest_sz = df_sz.iloc[-1].to_dict()
-            result["深股通"] = latest_sz
-        return result
-    except Exception as e:
-        print(f"  ⚠️ 获取北向资金数据失败: {e}")
-        return {}
+    # AkShare API 名称会随版本变化，按优先级尝试
+    api_names = [
+        "stock_hsgt_north_net_flow_in_em",
+        "stock_em_hsgt_north_net_flow_in",
+        "stock_hsgt_hist_em",
+    ]
+    result = {}
+    for api_name in api_names:
+        func = getattr(ak, api_name, None)
+        if func is None:
+            continue
+        try:
+            for channel in ["沪股通", "深股通"]:
+                df = func(symbol=channel)
+                if not df.empty:
+                    result[channel] = df.iloc[-1].to_dict()
+            if result:
+                return result
+        except Exception:
+            continue
+    # 所有 API 都失败
+    print("  ⚠️ 获取北向资金数据失败: 未找到可用的 AkShare 接口")
+    return {}
 
 
 def get_margin_data(symbol: str) -> pd.DataFrame:
