@@ -1,0 +1,7 @@
+pandas
+numpy
+akshare
+ta
+pytdx
+TA-Lib
+requests

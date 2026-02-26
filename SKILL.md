@@ -21,11 +21,11 @@ requires:
 bash setup.sh
 ```
 
-脚本会自动完成：安装系统依赖 (TA-Lib C 库) → 创建 conda 环境 → 验证安装。
+脚本会自动完成：检查 Python 3.9+ → 安装系统依赖 (TA-Lib) → 创建 venv → 安装 pip 包 → 验证。
 
-如果环境已存在，直接激活即可：
+后续使用前激活环境即可：
 ```bash
-conda activate stock-assistant
+source .venv/bin/activate
 ```
 
 ## 可用工具
