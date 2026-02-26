@@ -250,14 +250,23 @@ python3 scripts/stock_screener.py screen --strategy trend_pullback
 python3 scripts/stock_screener.py screen --strategy ice_reversal
 ```
 
-### 16. R倍数交易建议（V3 增强）
+### 16. 一键交易计划 (`plan` — 核心命令)
 
 ```bash
-# 含R倍数仓位计算的交易建议
-python3 scripts/trading_strategy.py advise --symbol 000858 --capital 100000
+# 自动选股 + 计算条件单参数 + 持仓检查
+python3 scripts/trading_strategy.py plan --capital 100000
 
-# 自定义单笔风险比例（默认1%）
-python3 scripts/trading_strategy.py advise --symbol 000858 --capital 100000 --risk-pct 0.02
+# 加入外部候选（从其他渠道发现的票）
+python3 scripts/trading_strategy.py plan --capital 100000 --extra 000858,600519
+
+# 指定选股策略
+python3 scripts/trading_strategy.py plan --capital 100000 --strategy leader_first_board
+
+# 自定义风险比例（默认1%）
+python3 scripts/trading_strategy.py plan --capital 100000 --risk-pct 0.02
+
+# 单只股票详细建议
+python3 scripts/trading_strategy.py advise --symbol 000858 --capital 100000
 ```
 
 ## 常见对话场景

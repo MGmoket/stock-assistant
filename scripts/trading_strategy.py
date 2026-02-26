@@ -220,10 +220,28 @@ def generate_advice(symbol: str, capital: float = 30000,
 
 # ─── 输出 ────────────────────────────────────────────────────────────────────────
 
-def display_advice(advice: dict):
-    """展示单只股票交易建议。"""
+def _print_condition_order(advice: dict):
+    """输出条件单参数（可直接设到东方财富）。"""
+    name = advice["名称"]
+    code = advice["代码"]
+    if advice["方向"] != "买入" or advice["买入股数"] <= 0:
+        return
+    print(f"  📌 {name}({code})")
+    print(f"     买入条件单: 价格 ≤ {format_price(advice['建议价格'])} 时买入 {advice['买入股数']}股")
+    print(f"     止损条件单: 价格 ≤ {format_price(advice['止损价'])} 时全部卖出 ({advice['止损幅度']:+.1f}%)")
+    print(f"     止盈条件单: 价格 ≥ {format_price(advice['止盈价'])} 时全部卖出 ({advice['止盈幅度']:+.1f}%)")
+    print(f"     金额 {format_price(advice['买入金额'])} | 最大亏损 {format_price(advice['单笔最大亏损'])} | R倍数 {advice.get('R倍数', '-')}")
+    print()
+
+
+def display_advice(advice: dict, brief: bool = False):
+    """展示单只股票交易建议。brief=True 只输出条件单参数。"""
     if "error" in advice:
         print(f"  ❌ {advice['error']}")
+        return
+
+    if brief:
+        _print_condition_order(advice)
         return
 
     name = advice["名称"]
@@ -262,16 +280,6 @@ def display_advice(advice: dict):
     for i, risk in enumerate(advice["风险提示"], 1):
         print(f"      {i}. {risk}")
 
-    if advice["方向"] == "买入" and advice["买入股数"] > 0:
-        print(f"\n{'─' * 50}")
-        print(f"  🔔 操作指令 — 请在东方财富执行:")
-        print(f"    股票: {name} ({code})")
-        print(f"    方向: 买入")
-        print(f"    价格: 限价 {format_price(advice['建议价格'])}")
-        print(f"    数量: {advice['买入股数']} 股")
-        print(f"    金额: {format_price(advice['买入金额'])}")
-        print(f"{'─' * 50}")
-
 
 def display_batch(symbols: list, capital: float = 30000, risk_pct: float = RISK_PER_TRADE_PCT):
     """批量生成交易建议。"""
@@ -293,18 +301,167 @@ def display_batch(symbols: list, capital: float = 30000, risk_pct: float = RISK_
         print_kv("剩余现金", format_price(capital - total_amount))
 
 
-def display_daily_plan(capital: float = 30000, risk_pct: float = RISK_PER_TRADE_PCT):
-    """生成每日交易计划。"""
+def _check_positions(capital: float, risk_pct: float) -> list:
+    """检查持仓健康状态。"""
+    import json
+    from utils import DATA_DIR, ensure_dirs
+    ensure_dirs()
+    portfolio_file = DATA_DIR / "portfolio.json"
+    if not portfolio_file.exists():
+        return []
+    with open(portfolio_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    positions = data.get("positions", {})
+    if not positions:
+        return []
+
+    from technical import _get_hist, calc_boll
+    codes = list(positions.keys())
+    quotes = sina_realtime_quote(codes)
+    alerts = []
+    for code, pos in positions.items():
+        qty = pos["quantity"]
+        avg_cost = pos["avg_cost"]
+        current_price = avg_cost
+        name = code
+        if not quotes.empty:
+            match = quotes[quotes["代码"] == code]
+            if not match.empty:
+                current_price = float(match.iloc[0].get("最新价", avg_cost))
+                name = match.iloc[0].get("名称", code)
+        pnl_pct = (current_price - avg_cost) / avg_cost * 100
+
+        # 计算关键价位
+        try:
+            hist = _get_hist(code, count=30)
+            boll = calc_boll(hist) if not hist.empty else {}
+        except Exception:
+            boll = {}
+
+        stop_loss = max(boll.get("下轨", avg_cost * 0.95), avg_cost * 0.95)
+        take_profit = min(boll.get("上轨", avg_cost * 1.1), avg_cost * 1.1)
+
+        sl_dist = (current_price - stop_loss) / current_price * 100
+        tp_dist = (take_profit - current_price) / current_price * 100
+
+        if current_price >= take_profit:
+            status = "🔴 已达止盈！建议设卖出条件单"
+        elif current_price <= stop_loss:
+            status = "🔴 已触止损！建议立即卖出"
+        elif sl_dist < 2:
+            status = f"⚠️ 接近止损 (距止损 {sl_dist:.1f}%)"
+        elif pnl_pct > 5:
+            status = f"✅ 盈利 {pnl_pct:+.1f}%，建议上移止损保护浮盈"
+        else:
+            status = f"✅ 正常 (距止损 {sl_dist:.1f}%, 距止盈 {tp_dist:.1f}%)"
+
+        alerts.append({
+            "代码": code, "名称": name, "数量": qty,
+            "成本": avg_cost, "现价": current_price,
+            "盈亏": pnl_pct, "状态": status,
+            "止损": round(stop_loss, 2), "止盈": round(take_profit, 2),
+        })
+    return alerts
+
+
+def display_plan(capital: float = 30000, risk_pct: float = RISK_PER_TRADE_PCT,
+                 extra_symbols: list = None, strategy: str = "short_term",
+                 count: int = 3):
+    """
+    一键生成交易计划:
+      Section 1: 条件单参数清单（在最前面）
+      Section 2: 持仓健康检查
+      Section 3: 详细分析报告
+    """
     from stock_screener import run_preset
-    print_header(f"📅 每日交易计划 (资金: {format_price(capital)})")
-    print("\n  ⏳ 正在选股...")
-    candidates = run_preset("short_term", count=5)
-    if candidates.empty:
-        print("  今日暂无推荐股票")
-        return
-    symbols = candidates["代码"].tolist()
-    print(f"  ✅ 选出 {len(symbols)} 只候选股票\n")
-    display_batch(symbols, capital=capital, risk_pct=risk_pct)
+
+    print(f"\n{'━' * 55}")
+    print(f"  📋 交易计划 (资金: {format_price(capital)} | 风险: {risk_pct*100:.0f}%)")
+    print(f"{'━' * 55}")
+
+    # 获取情绪
+    sentiment_score = 50
+    sentiment_level = "中性"
+    try:
+        from market_sentiment import get_market_breadth, get_index_status, calc_sentiment_score
+        breadth = get_market_breadth()
+        indices = get_index_status()
+        sentiment = calc_sentiment_score(breadth, indices)
+        sentiment_score = sentiment.get("分数", 50)
+        sentiment_level = sentiment.get("级别", "中性")
+        position_advice = sentiment.get("建议仓位", "50%")
+        print(f"\n  🌊 市场情绪: {sentiment_score} — {sentiment_level} | 建议总仓位 ≤ {position_advice}")
+    except Exception:
+        print("\n  🌊 市场情绪: (暂不可用)")
+
+    # 选股
+    symbols = []
+    print(f"\n  ⏳ 正在选股 ({strategy})...")
+    try:
+        candidates = run_preset(strategy, count=count)
+        if not candidates.empty:
+            symbols = candidates["代码"].tolist()
+    except Exception as e:
+        print(f"  ⚠️ 选股失败: {e}")
+
+    # 合并外部候选
+    if extra_symbols:
+        for s in extra_symbols:
+            code = normalize_symbol(s)
+            if code not in symbols:
+                symbols.append(code)
+        print(f"  📎 加入外部候选: {', '.join(extra_symbols)}")
+
+    if not symbols:
+        print("  今日暂无候选股票")
+    else:
+        print(f"  ✅ 共 {len(symbols)} 只候选")
+
+    # 生成所有建议
+    advices = []
+    for i, sym in enumerate(symbols):
+        advice = generate_advice(sym, capital=capital, existing_positions=i, risk_pct=risk_pct)
+        advices.append(advice)
+
+    buy_list = [a for a in advices if a.get("方向") == "买入" and a.get("买入股数", 0) > 0]
+
+    # ═══ Section 1: 条件单参数清单 ═══
+    print(f"\n{'━' * 55}")
+    print(f"  🔔 条件单参数清单 — 可直接设到东方财富")
+    print(f"{'━' * 55}\n")
+
+    if buy_list:
+        total_amount = 0
+        for a in buy_list:
+            _print_condition_order(a)
+            total_amount += a["买入金额"]
+        print(f"  {'─' * 45}")
+        print(f"  📊 合计: {len(buy_list)} 只 | 总金额 {format_price(total_amount)} | 剩余 {format_price(capital - total_amount)}")
+    else:
+        print("  (今日无新建条件单建议)")
+
+    # ═══ Section 2: 持仓健康检查 ═══
+    print(f"\n{'━' * 55}")
+    print(f"  📊 持仓健康检查")
+    print(f"{'━' * 55}")
+
+    alerts = _check_positions(capital, risk_pct)
+    if alerts:
+        for a in alerts:
+            print(f"  {a['状态']}")
+            print(f"     {a['名称']}({a['代码']}) {a['数量']}股 | 成本 {format_price(a['成本'])} → 现价 {format_price(a['现价'])} ({a['盈亏']:+.1f}%)")
+            print(f"     止损 {format_price(a['止损'])} | 止盈 {format_price(a['止盈'])}")
+            print()
+    else:
+        print("  📭 当前无持仓")
+
+    # ═══ Section 3: 详细分析报告 ═══
+    if advices:
+        print(f"\n{'━' * 55}")
+        print(f"  📝 详细分析报告")
+        print(f"{'━' * 55}")
+        for advice in advices:
+            display_advice(advice)
 
 
 # ─── CLI ─────────────────────────────────────────────────────────────────────────
@@ -324,7 +481,17 @@ def main():
     p_bat.add_argument("--capital", type=float, default=30000)
     p_bat.add_argument("--risk-pct", type=float, default=RISK_PER_TRADE_PCT)
 
-    p_dp = sub.add_parser("daily-plan", help="生成每日交易计划")
+    p_plan = sub.add_parser("plan", help="一键生成交易计划（条件单在前 + 持仓检查 + 详细报告）")
+    p_plan.add_argument("--capital", type=float, default=30000)
+    p_plan.add_argument("--risk-pct", type=float, default=RISK_PER_TRADE_PCT)
+    p_plan.add_argument("--strategy", default="short_term",
+                        help="选股策略 (short_term/leader_first_board/trend_pullback)")
+    p_plan.add_argument("--extra", default="",
+                        help="外部候选代码，逗号分隔 (如 000858,600519)")
+    p_plan.add_argument("--count", type=int, default=3, help="选股数量")
+
+    # 兼容旧命令
+    p_dp = sub.add_parser("daily-plan", help="(旧版) 等同于 plan")
     p_dp.add_argument("--capital", type=float, default=30000)
     p_dp.add_argument("--risk-pct", type=float, default=RISK_PER_TRADE_PCT)
 
@@ -336,8 +503,12 @@ def main():
     elif args.action == "batch":
         symbols = [s.strip() for s in args.symbols.split(",")]
         display_batch(symbols, capital=args.capital, risk_pct=args.risk_pct)
+    elif args.action == "plan":
+        extra = [s.strip() for s in args.extra.split(",") if s.strip()] if args.extra else None
+        display_plan(capital=args.capital, risk_pct=args.risk_pct,
+                     extra_symbols=extra, strategy=args.strategy, count=args.count)
     elif args.action == "daily-plan":
-        display_daily_plan(capital=args.capital, risk_pct=args.risk_pct)
+        display_plan(capital=args.capital, risk_pct=args.risk_pct)
     else:
         parser.print_help()
 
