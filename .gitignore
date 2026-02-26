@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Data (runtime generated)
+data/cache/
+data/portfolio.json
+
+# Conda
+.conda/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store

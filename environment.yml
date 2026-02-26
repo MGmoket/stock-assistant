@@ -1,0 +1,12 @@
+name: stock-assistant
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pandas
+  - numpy
+  - pip
+  - pip:
+    - akshare
+    - ta
