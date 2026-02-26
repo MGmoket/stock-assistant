@@ -204,6 +204,29 @@ python3 scripts/daily_review.py review
 python3 scripts/daily_review.py review --date 2026-02-26
 ```
 
+### 12. 市场情绪面板 (`scripts/market_sentiment.py`)
+
+```bash
+# 展示完整情绪面板（指数 + 涨跌统计 + 情绪评分 + 热门板块）
+python3 scripts/market_sentiment.py dashboard
+
+# 仅查看情绪评分
+python3 scripts/market_sentiment.py sentiment
+```
+
+### 13. 策略回测 (`scripts/backtest.py`)
+
+```bash
+# 均线金叉死叉回测
+python3 scripts/backtest.py run --symbol 000858 --strategy ma_cross --start 2025-01-01 --capital 50000
+
+# MACD 金叉死叉回测
+python3 scripts/backtest.py run --symbol 000858 --strategy macd_cross --start 2025-01-01
+
+# 查看可用策略
+python3 scripts/backtest.py list
+```
+
 ## 常见对话场景
 
 - "帮我看看贵州茅台最近的走势"→ 使用行情查询 + 技术面分析
@@ -214,4 +237,5 @@ python3 scripts/daily_review.py review --date 2026-02-26
 - "我刚买了 100 股茅台，帮我记录一下"→ 使用持仓管理
 - "导入我的交割单"→ 使用交割单导入
 - "帮我做个今日复盘"→ 使用每日复盘
-
+- "今天市场情绪如何？"→ 使用市场情绪面板
+- "帮我回测下五粮液的均线策略"→ 使用策略回测
