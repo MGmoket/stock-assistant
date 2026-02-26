@@ -12,7 +12,104 @@ from utils import (
     format_number, format_percent, format_price,
     print_header, print_section, print_kv,
     get_cache, set_cache,
+    normalize_symbol, is_st, _sina_symbol,
 )
+
+
+# ─── 涨跌停辅助 ────────────────────────────────────────────────────────────────
+
+def _limit_up_pct(code: str, name: str = "") -> float:
+    """按板块估算涨跌停幅度（降级版，近似口径）。"""
+    code = normalize_symbol(code)
+    if is_st(name):
+        return 5.0
+    if code.startswith(("300", "301", "688", "689")):
+        return 20.0
+    if code.startswith(("8", "4")):
+        return 30.0
+    return 10.0
+
+
+def _limit_threshold(code: str, name: str = "", tolerance: float = 0.2) -> float:
+    """涨跌停阈值，加入容错空间。"""
+    return _limit_up_pct(code, name) - tolerance
+
+
+def _is_limit_up(pct: float, code: str, name: str = "") -> bool:
+    if pct is None or pd.isna(pct):
+        return False
+    return pct >= _limit_threshold(code, name)
+
+
+def _is_limit_down(pct: float, code: str, name: str = "") -> bool:
+    if pct is None or pd.isna(pct):
+        return False
+    return pct <= -_limit_threshold(code, name)
+
+
+def _calc_limit_up_streak(code: str, name: str, lookback_days: int = 10) -> int:
+    """计算单只股票连续涨停天数（从最新交易日向前）。"""
+    try:
+        sina_code = _sina_symbol(code)
+        df = ak.stock_zh_a_daily(symbol=sina_code, adjust="qfq")
+        if df is None or df.empty or len(df) < 2:
+            return 0
+        df = df.tail(lookback_days + 1).reset_index(drop=True)
+        if "close" not in df.columns:
+            return 0
+        close = pd.to_numeric(df["close"], errors="coerce")
+        pct = close.pct_change() * 100
+        threshold = _limit_threshold(code, name)
+        count = 0
+        for i in range(len(pct) - 1, 0, -1):
+            if pct.iloc[i] >= threshold:
+                count += 1
+            else:
+                break
+        return count
+    except Exception:
+        return 0
+
+
+def get_limit_up_height(lookback_days: int = 10, spot_df: pd.DataFrame | None = None) -> int:
+    """
+    计算全市场连板高度（降级版）：
+    - 仅统计今日涨停股
+    - 用日线连续涨停近似
+    """
+    cached = get_cache("limit_up_height", ttl_minutes=10, lookback_days=lookback_days)
+    if cached is not None:
+        return cached
+
+    try:
+        df = spot_df if spot_df is not None else ak.stock_zh_a_spot()
+        if df is None or df.empty:
+            return 0
+        change_col = None
+        for c in ["changepercent", "涨跌幅", "change_percent"]:
+            if c in df.columns:
+                change_col = c
+                break
+        if change_col is None:
+            return 0
+        df[change_col] = pd.to_numeric(df[change_col], errors="coerce")
+
+        max_height = 0
+        if "名称" not in df.columns:
+            df["名称"] = ""
+        if "代码" not in df.columns:
+            return 0
+        for code, name, pct in df[["代码", "名称", change_col]].itertuples(index=False, name=None):
+            if not code:
+                continue
+            if _is_limit_up(pct, code, name):
+                height = _calc_limit_up_streak(code, name, lookback_days=lookback_days)
+                if height > max_height:
+                    max_height = height
+        set_cache("limit_up_height", max_height, lookback_days=lookback_days)
+        return max_height
+    except Exception:
+        return 0
 
 
 # ─── 市场情绪指标 ────────────────────────────────────────────────────────────────
@@ -40,10 +137,19 @@ def get_market_breadth() -> dict:
         up_count = len(df[df[change_col] > 0])
         down_count = len(df[df[change_col] < 0])
         flat_count = total - up_count - down_count
-        limit_up = len(df[df[change_col] >= 9.8])
-        limit_down = len(df[df[change_col] <= -9.8])
+        limit_up = 0
+        limit_down = 0
+        if "名称" not in df.columns:
+            df["名称"] = ""
+        for code, name, pct in df[["代码", "名称", change_col]].itertuples(index=False, name=None):
+            if _is_limit_up(pct, code, name):
+                limit_up += 1
+            if _is_limit_down(pct, code, name):
+                limit_down += 1
 
         breadth = up_count / total * 100 if total > 0 else 50
+
+        limit_up_height = get_limit_up_height(lookback_days=10, spot_df=df)
 
         result = {
             "总数": total,
@@ -52,6 +158,7 @@ def get_market_breadth() -> dict:
             "平盘": flat_count,
             "涨停": limit_up,
             "跌停": limit_down,
+            "连板高度": limit_up_height,
             "涨跌比": round(up_count / max(down_count, 1), 2),
             "赚钱效应": round(breadth, 1),
         }
@@ -161,6 +268,15 @@ def calc_sentiment_score(breadth: dict, indices: list) -> dict:
     elif limit_down > 10:
         score -= 5
 
+    # 连板高度（短线活跃度）
+    height = breadth.get("连板高度", 0)
+    if height >= 6:
+        score += 10
+    elif height >= 4:
+        score += 5
+    elif height <= 2:
+        score -= 5
+
     # 指数涨跌 20%
     if indices:
         avg_change = sum(float(idx.get("涨跌幅", 0)) for idx in indices) / len(indices)
@@ -227,6 +343,7 @@ def display_dashboard():
         print_kv("平盘", f"{breadth['平盘']} 家")
         print_kv("涨停", f"🔴 {breadth['涨停']} 家")
         print_kv("跌停", f"🟢 {breadth['跌停']} 家")
+        print_kv("连板高度", f"{breadth['连板高度']} 板")
         print_kv("涨跌比", f"{breadth['涨跌比']}")
         print_kv("赚钱效应", f"{breadth['赚钱效应']}%")
 

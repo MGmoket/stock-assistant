@@ -47,6 +47,41 @@ PRESETS = {
             "涨跌幅_max": 9.0,
         },
     },
+    "leader_first_board": {
+        "name": "龙头首板（基础版）",
+        "description": "接近涨停 + 合理换手 + 价格区间过滤（降级版）",
+        "advanced": True,
+        "strategy": "leader_first_board",
+        "filters": {
+            "涨跌幅_min": 9.5,
+            "换手率_min": 5.0,
+            "换手率_max": 25.0,
+            "price_min": 3.0,
+            "price_max": 100.0,
+        },
+    },
+    "trend_pullback": {
+        "name": "趋势强股低吸（基础版）",
+        "description": "趋势向上 + 回踩 MA10 附近 + RSI 适中",
+        "advanced": True,
+        "strategy": "trend_pullback",
+        "filters": {
+            "涨跌幅_min": -3.0,
+            "涨跌幅_max": 5.0,
+            "price_min": 3.0,
+            "price_max": 100.0,
+        },
+    },
+    "ice_reversal": {
+        "name": "冰点反转（基础版）",
+        "description": "仅在情绪冰点时启用：超跌 + 放量 + 接近下轨",
+        "advanced": True,
+        "strategy": "ice_reversal",
+        "filters": {
+            "涨跌幅_max": -2.0,
+            "price_min": 2.0,
+        },
+    },
 }
 
 
@@ -83,6 +118,7 @@ def screen_by_basic_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
     result = df.copy()
 
     change_col = "涨跌幅" if "涨跌幅" in result.columns else "changepercent"
+    price_col = "最新价" if "最新价" in result.columns else None
 
     if "涨跌幅_min" in filters and change_col in result.columns:
         result = result[pd.to_numeric(result[change_col], errors='coerce') >= filters["涨跌幅_min"]]
@@ -97,6 +133,11 @@ def screen_by_basic_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
     if "pe_max" in filters and "市盈率" in result.columns:
         pe = pd.to_numeric(result["市盈率"], errors='coerce')
         result = result[(pe > 0) & (pe <= filters["pe_max"])]
+
+    if price_col and "price_min" in filters:
+        result = result[pd.to_numeric(result[price_col], errors='coerce') >= filters["price_min"]]
+    if price_col and "price_max" in filters:
+        result = result[pd.to_numeric(result[price_col], errors='coerce') <= filters["price_max"]]
 
     return result.reset_index(drop=True)
 
@@ -145,6 +186,154 @@ def screen_with_technical(df: pd.DataFrame, require_macd_golden: bool = False,
     return pd.DataFrame(qualified).reset_index(drop=True)
 
 
+def _select_candidates(df: pd.DataFrame, max_candidates: int = 80) -> pd.DataFrame:
+    """从基础筛选结果中挑选用于计算的候选集，避免全市场逐票计算过慢。"""
+    if df.empty:
+        return df
+    if "成交额" in df.columns:
+        return df.sort_values("成交额", ascending=False).head(max_candidates).reset_index(drop=True)
+    change_col = "涨跌幅" if "涨跌幅" in df.columns else "changepercent"
+    if change_col in df.columns:
+        return df.sort_values(change_col, ascending=False).head(max_candidates).reset_index(drop=True)
+    return df.head(max_candidates).reset_index(drop=True)
+
+
+def run_leader_first_board(count: int = 10) -> pd.DataFrame:
+    """龙头首板（基础版）：接近涨停 + 合理换手 + 价格区间。"""
+    df = get_all_stocks()
+    if df.empty:
+        return df
+    df = screen_by_basic_filters(df, PRESETS["leader_first_board"]["filters"])
+    change_col = "涨跌幅" if "涨跌幅" in df.columns else "changepercent"
+    if change_col in df.columns:
+        df[change_col] = pd.to_numeric(df[change_col], errors='coerce')
+        df = df.sort_values(change_col, ascending=False)
+    return df.head(count).reset_index(drop=True)
+
+
+def run_trend_pullback(count: int = 10) -> pd.DataFrame:
+    """趋势强股低吸（基础版）。"""
+    df = get_all_stocks()
+    if df.empty:
+        return df
+    df = screen_by_basic_filters(df, PRESETS["trend_pullback"]["filters"])
+    df = _select_candidates(df, max_candidates=80)
+
+    from technical import _get_hist, calc_ma, calc_rsi, calc_candlestick
+
+    qualified = []
+    total = len(df)
+    for idx, row in df.iterrows():
+        code = row["代码"]
+        try:
+            hist = _get_hist(code, count=120)
+            if hist.empty or len(hist) < 60:
+                continue
+
+            ma = calc_ma(hist, periods=[10, 20, 60])
+            rsi = calc_rsi(hist, periods=[6])
+            cur = ma.get("当前价", 0)
+            ma10 = ma.get("均线", {}).get("MA10", {}).get("值", 0)
+            ma20 = ma.get("均线", {}).get("MA20", {}).get("值", 0)
+            ma60 = ma.get("均线", {}).get("MA60", {}).get("值", 0)
+
+            if not (cur > ma20 and cur > ma60 and ma20 > ma60):
+                continue
+            if ma10 <= 0 or abs(cur - ma10) / ma10 > 0.02:
+                continue
+
+            rsi6 = rsi.get("RSI6", {}).get("值", 50)
+            if not (30 <= rsi6 <= 60):
+                continue
+
+            close = hist["收盘"].astype(float)
+            pct = close.pct_change() * 100
+            if pct.tail(20).max() < 9.5:
+                continue
+
+            candles = calc_candlestick(hist)
+            if candles is not None:
+                bullish = [c for c in candles if c.get("方向") == "看涨"]
+                if not bullish:
+                    continue
+
+            qualified.append(row)
+        except Exception:
+            continue
+
+        if (idx + 1) % 20 == 0:
+            print(f"  ⏳ 趋势强股筛选进度: {idx + 1}/{total}")
+
+    if not qualified:
+        return pd.DataFrame()
+    return pd.DataFrame(qualified).head(count).reset_index(drop=True)
+
+
+def run_ice_reversal(count: int = 10) -> pd.DataFrame:
+    """冰点反转（基础版）。"""
+    from market_sentiment import get_market_breadth, get_index_status, calc_sentiment_score
+    breadth = get_market_breadth()
+    indices = get_index_status()
+    sentiment = calc_sentiment_score(breadth, indices)
+    if sentiment.get("分数", 50) >= 25:
+        print("  ⚠️ 当前非冰点情绪，冰点反转策略暂不启用")
+        return pd.DataFrame()
+
+    df = get_all_stocks()
+    if df.empty:
+        return df
+    df = screen_by_basic_filters(df, PRESETS["ice_reversal"]["filters"])
+    change_col = "涨跌幅" if "涨跌幅" in df.columns else "changepercent"
+    if change_col in df.columns:
+        df[change_col] = pd.to_numeric(df[change_col], errors='coerce')
+        df = df.sort_values(change_col, ascending=True)
+    df = _select_candidates(df, max_candidates=80)
+
+    from technical import _get_hist, calc_boll, calc_candlestick
+
+    qualified = []
+    total = len(df)
+    for idx, row in df.iterrows():
+        code = row["代码"]
+        try:
+            hist = _get_hist(code, count=60)
+            if hist.empty or len(hist) < 20:
+                continue
+
+            close = hist["收盘"].astype(float)
+            vol = hist["成交量"].astype(float)
+            if len(close) < 6:
+                continue
+
+            pct_5 = (close.iloc[-1] / close.iloc[-6] - 1) * 100
+            if pct_5 > -10:
+                continue
+
+            if vol.iloc[-2] > 0 and vol.iloc[-1] <= vol.iloc[-2] * 1.3:
+                continue
+
+            boll = calc_boll(hist)
+            if boll.get("位置百分比", 50) > 30:
+                continue
+
+            candles = calc_candlestick(hist)
+            if candles is not None:
+                bullish = [c for c in candles if c.get("方向") == "看涨"]
+                if not bullish:
+                    continue
+
+            qualified.append(row)
+        except Exception:
+            continue
+
+        if (idx + 1) % 20 == 0:
+            print(f"  ⏳ 冰点反转筛选进度: {idx + 1}/{total}")
+
+    if not qualified:
+        return pd.DataFrame()
+    return pd.DataFrame(qualified).head(count).reset_index(drop=True)
+
+
 def run_preset(preset_name: str, count: int = 10) -> pd.DataFrame:
     """运行预设策略选股。"""
     if preset_name not in PRESETS:
@@ -154,6 +343,15 @@ def run_preset(preset_name: str, count: int = 10) -> pd.DataFrame:
     preset = PRESETS[preset_name]
     print(f"  📋 策略: {preset['name']}")
     print(f"  📝 {preset['description']}\n")
+
+    if preset.get("advanced"):
+        strategy = preset.get("strategy")
+        if strategy == "leader_first_board":
+            return run_leader_first_board(count=count)
+        if strategy == "trend_pullback":
+            return run_trend_pullback(count=count)
+        if strategy == "ice_reversal":
+            return run_ice_reversal(count=count)
 
     df = get_all_stocks()
     if df.empty:

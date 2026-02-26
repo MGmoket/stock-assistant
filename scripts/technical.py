@@ -236,7 +236,20 @@ def calc_volume_analysis(df: pd.DataFrame) -> dict:
 
 # ─── 综合评分 ────────────────────────────────────────────────────────────────────
 
-def calc_score(ma: dict, macd: dict, kdj: dict, boll: dict, rsi: dict, vol: dict) -> dict:
+def calc_candlestick(df: pd.DataFrame):
+    """计算 K 线形态（若未安装 TA-Lib，则返回 None）。"""
+    try:
+        from candlestick import detect_candlestick
+    except Exception:
+        return None
+    try:
+        return detect_candlestick(df)
+    except Exception:
+        return None
+
+
+def calc_score(ma: dict, macd: dict, kdj: dict, boll: dict,
+               rsi: dict, vol: dict, candles: list | None = None) -> dict:
     """
     综合技术评分（满分 100）。
     > 80: 强烈买入, 60-80: 买入, 40-60: 中性, 20-40: 卖出, < 20: 强烈卖出
@@ -287,6 +300,11 @@ def calc_score(ma: dict, macd: dict, kdj: dict, boll: dict, rsi: dict, vol: dict
     elif "缩量回调" in combo:
         score += 3
 
+    if candles:
+        candle_bonus = sum(p.get("分值", 0) for p in candles)
+        candle_bonus = max(-15, min(15, candle_bonus))
+        score += candle_bonus
+
     score = max(0, min(100, score))
 
     if score >= 80:
@@ -319,7 +337,8 @@ def display_full_analysis(symbol: str):
     boll = calc_boll(df)
     rsi = calc_rsi(df)
     vol = calc_volume_analysis(df)
-    score = calc_score(ma, macd, kdj, boll, rsi, vol)
+    candles = calc_candlestick(df)
+    score = calc_score(ma, macd, kdj, boll, rsi, vol, candles)
 
     print_header(f"{code} 综合技术分析")
 
@@ -362,6 +381,15 @@ def display_full_analysis(symbol: str):
     print_kv("量比", str(vol["量比"]))
     print_kv("量能状态", vol["量能状态"])
     print_kv("量价配合", vol["量价配合"])
+
+    print_section("K线形态")
+    if candles is None:
+        print_kv("状态", "未启用（缺少 TA-Lib）")
+    elif not candles:
+        print_kv("形态", "未识别到明显形态")
+    else:
+        for p in candles:
+            print_kv(p["形态"], f"{p['方向']} | 分值 {p['分值']} | {p['描述']}")
 
 
 def display_single_indicator(symbol: str, indicator_name: str):

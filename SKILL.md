@@ -227,6 +227,39 @@ python3 scripts/backtest.py run --symbol 000858 --strategy macd_cross --start 20
 python3 scripts/backtest.py list
 ```
 
+### 14. K线形态识别 (`scripts/candlestick.py`)
+
+```bash
+# 扫描日线K线形态（锤子线/吞没/早晨之星等12种）
+python3 scripts/candlestick.py scan --symbol 600519
+
+# 扫描60分钟K线形态
+python3 scripts/candlestick.py scan --symbol 600519 --period 60min
+```
+
+### 15. 专业选股策略（V3 新增）
+
+```bash
+# 龙头首板 — 接近涨停 + 换手合理
+python3 scripts/stock_screener.py screen --strategy leader_first_board
+
+# 趋势强股低吸 — 均线多头 + 回踩MA10 + K线反转
+python3 scripts/stock_screener.py screen --strategy trend_pullback
+
+# 冰点反转 — 仅在情绪冰点时启用
+python3 scripts/stock_screener.py screen --strategy ice_reversal
+```
+
+### 16. R倍数交易建议（V3 增强）
+
+```bash
+# 含R倍数仓位计算的交易建议
+python3 scripts/trading_strategy.py advise --symbol 000858 --capital 100000
+
+# 自定义单笔风险比例（默认1%）
+python3 scripts/trading_strategy.py advise --symbol 000858 --capital 100000 --risk-pct 0.02
+```
+
 ## 常见对话场景
 
 - "帮我看看贵州茅台最近的走势"→ 使用行情查询 + 技术面分析
@@ -234,8 +267,13 @@ python3 scripts/backtest.py list
 - "茅台现在的盘口是什么样？"→ 使用五档盘口
 - "今天哪些板块资金流入最多？"→ 使用资金流向模块
 - "推荐几只适合短线操作的股票"→ 使用选股引擎 + 交易策略
+- "帮我选点龙头首板的票"→ 使用 `leader_first_board` 策略
+- "趋势好的票有哪些在回踩？"→ 使用 `trend_pullback` 策略
+- "现在是冰点环境吗？"→ 使用情绪面板，如分数<25 可用冰点反转策略
+- "茅台的K线形态怎么样？"→ 使用K线形态识别
+- "茅台值不值得买，帮我算下仓位"→ 使用R倍数交易建议
 - "我刚买了 100 股茅台，帮我记录一下"→ 使用持仓管理
 - "导入我的交割单"→ 使用交割单导入
-- "帮我做个今日复盘"→ 使用每日复盘
+- "帮我做个今日复盘"→ 使用结构化复盘（5问框架）
 - "今天市场情绪如何？"→ 使用市场情绪面板
 - "帮我回测下五粮液的均线策略"→ 使用策略回测

@@ -23,6 +23,7 @@ MAX_SINGLE_POSITION_PCT = 0.50   # 单只最大仓位 50%
 MAX_TOTAL_POSITION_PCT = 0.80    # 最大总仓位 80%
 MAX_HOLDINGS = 3                 # 最多同时持有 3 只
 MIN_LOT = 100                    # 最小交易单位
+RISK_PER_TRADE_PCT = 0.01        # 单笔风险占用资金比例（默认 1%）
 
 
 def _round_lot(shares: int) -> int:
@@ -33,9 +34,13 @@ def _round_lot(shares: int) -> int:
 # ─── 交易建议生成 ─────────────────────────────────────────────────────────────────
 
 def generate_advice(symbol: str, capital: float = 30000,
-                    existing_positions: int = 0) -> dict:
+                    existing_positions: int = 0,
+                    risk_pct: float = RISK_PER_TRADE_PCT) -> dict:
     """为指定股票生成交易建议。"""
-    from technical import _get_hist, calc_ma, calc_macd, calc_kdj, calc_boll, calc_rsi, calc_volume_analysis, calc_score
+    from technical import (
+        _get_hist, calc_ma, calc_macd, calc_kdj, calc_boll,
+        calc_rsi, calc_volume_analysis, calc_score, calc_candlestick,
+    )
 
     code = normalize_symbol(symbol)
 
@@ -61,7 +66,8 @@ def generate_advice(symbol: str, capital: float = 30000,
     boll = calc_boll(hist)
     rsi = calc_rsi(hist)
     vol = calc_volume_analysis(hist)
-    tech_score = calc_score(ma, macd, kdj, boll, rsi, vol)
+    candles = calc_candlestick(hist)
+    tech_score = calc_score(ma, macd, kdj, boll, rsi, vol, candles)
 
     score = tech_score["分数"]
     rating = tech_score["评级"]
@@ -85,6 +91,8 @@ def generate_advice(symbol: str, capital: float = 30000,
 
     stop_loss = max(boll_lower, recent_low)
     stop_loss = max(stop_loss, current_price * 0.95)
+    if stop_loss >= current_price:
+        stop_loss = current_price * 0.98
     stop_loss_pct = (stop_loss - current_price) / current_price * 100
 
     recent_high = hist["最高"].astype(float).tail(10).max()
@@ -95,6 +103,9 @@ def generate_advice(symbol: str, capital: float = 30000,
 
     # ─── 仓位计算 ─────────────────────────────────────────────────────────
     available_slots = MAX_HOLDINGS - existing_positions
+    risk_amount = capital * risk_pct
+    per_share_risk = current_price - stop_loss
+    risk_note = ""
     if available_slots <= 0 or direction != "买入":
         position_pct = 0
         shares = 0
@@ -110,18 +121,24 @@ def generate_advice(symbol: str, capital: float = 30000,
             position_pct = 0
 
         max_amount = capital * position_pct
-        shares = _round_lot(int(max_amount / current_price))
-        amount = shares * current_price
+        shares_cap = _round_lot(int(max_amount / current_price)) if max_amount > 0 else 0
+        if per_share_risk <= 0:
+            shares = 0
+            amount = 0
+            risk_note = "止损价不合理，无法计算 R 倍数仓位"
+        else:
+            shares_risk = _round_lot(int(risk_amount / per_share_risk))
+            shares = min(shares_cap, shares_risk) if shares_cap > 0 else 0
+            amount = shares * current_price
 
         if shares < MIN_LOT and direction == "买入":
-            if capital >= current_price * MIN_LOT:
-                shares = MIN_LOT
-                amount = shares * current_price
-                position_pct = amount / capital
-            else:
-                shares = 0
-                amount = 0
-                position_pct = 0
+            shares = 0
+            amount = 0
+            position_pct = 0
+            if risk_note == "":
+                risk_note = "单笔风险不足以覆盖最小交易单位"
+        if shares > 0:
+            position_pct = amount / capital
 
     # ─── 风险评级 ─────────────────────────────────────────────────────────
     risk_factors = []
@@ -172,8 +189,17 @@ def generate_advice(symbol: str, capital: float = 30000,
     if rsi6_val < 30:
         buy_reasons.append("RSI 超卖，有反弹动能")
 
+    if candles:
+        bullish = [c for c in candles if c.get("方向") == "看涨"]
+        if bullish:
+            buy_reasons.append("K线形态出现看涨信号")
+
     if not buy_reasons:
         buy_reasons.append("综合技术指标偏多" if score >= 50 else "当前无明显买入信号")
+
+    r_multiple = None
+    if per_share_risk > 0:
+        r_multiple = round((take_profit - current_price) / per_share_risk, 2)
 
     return {
         "代码": code, "名称": name, "当前价": current_price,
@@ -183,6 +209,9 @@ def generate_advice(symbol: str, capital: float = 30000,
         "止盈价": round(take_profit, 2), "止盈幅度": round(take_profit_pct, 1),
         "建议仓位": round(position_pct * 100, 1),
         "买入股数": shares, "买入金额": round(amount, 2),
+        "单笔最大亏损": round(risk_amount, 2),
+        "R倍数": r_multiple,
+        "风险说明": risk_note,
         "风险评级": risk_level, "技术评分": score, "技术评级": rating,
         "买入理由": buy_reasons,
         "风险提示": risk_factors if risk_factors else ["暂无明显风险"],
@@ -210,6 +239,11 @@ def display_advice(advice: dict):
     print_kv("建议价格", format_price(advice["建议价格"]))
     print_kv("止损价", f"{format_price(advice['止损价'])} ({advice['止损幅度']:+.1f}%)")
     print_kv("止盈价", f"{format_price(advice['止盈价'])} ({advice['止盈幅度']:+.1f}%)")
+    print_kv("单笔最大亏损", format_price(advice["单笔最大亏损"]))
+    if advice.get("R倍数") is not None:
+        print_kv("R倍数", str(advice["R倍数"]))
+    if advice.get("风险说明"):
+        print_kv("风控说明", advice["风险说明"])
 
     if advice["买入股数"] > 0:
         print_kv("建议仓位", f"{advice['建议仓位']:.0f}%")
@@ -239,12 +273,12 @@ def display_advice(advice: dict):
         print(f"{'─' * 50}")
 
 
-def display_batch(symbols: list, capital: float = 30000):
+def display_batch(symbols: list, capital: float = 30000, risk_pct: float = RISK_PER_TRADE_PCT):
     """批量生成交易建议。"""
     print_header(f"批量交易建议 (可用资金: {format_price(capital)})")
     advices = []
     for i, sym in enumerate(symbols):
-        advice = generate_advice(sym, capital=capital, existing_positions=i)
+        advice = generate_advice(sym, capital=capital, existing_positions=i, risk_pct=risk_pct)
         advices.append(advice)
         display_advice(advice)
 
@@ -259,7 +293,7 @@ def display_batch(symbols: list, capital: float = 30000):
         print_kv("剩余现金", format_price(capital - total_amount))
 
 
-def display_daily_plan(capital: float = 30000):
+def display_daily_plan(capital: float = 30000, risk_pct: float = RISK_PER_TRADE_PCT):
     """生成每日交易计划。"""
     from stock_screener import run_preset
     print_header(f"📅 每日交易计划 (资金: {format_price(capital)})")
@@ -270,7 +304,7 @@ def display_daily_plan(capital: float = 30000):
         return
     symbols = candidates["代码"].tolist()
     print(f"  ✅ 选出 {len(symbols)} 只候选股票\n")
-    display_batch(symbols, capital=capital)
+    display_batch(symbols, capital=capital, risk_pct=risk_pct)
 
 
 # ─── CLI ─────────────────────────────────────────────────────────────────────────
@@ -282,24 +316,28 @@ def main():
     p_adv = sub.add_parser("advise", help="对指定股票生成交易建议")
     p_adv.add_argument("--symbol", required=True)
     p_adv.add_argument("--capital", type=float, default=30000)
+    p_adv.add_argument("--risk-pct", type=float, default=RISK_PER_TRADE_PCT,
+                       help="单笔最大亏损占用资金比例，如 0.01 或 0.02")
 
     p_bat = sub.add_parser("batch", help="批量生成交易建议")
     p_bat.add_argument("--symbols", required=True, help="逗号分隔的代码")
     p_bat.add_argument("--capital", type=float, default=30000)
+    p_bat.add_argument("--risk-pct", type=float, default=RISK_PER_TRADE_PCT)
 
     p_dp = sub.add_parser("daily-plan", help="生成每日交易计划")
     p_dp.add_argument("--capital", type=float, default=30000)
+    p_dp.add_argument("--risk-pct", type=float, default=RISK_PER_TRADE_PCT)
 
     args = parser.parse_args()
 
     if args.action == "advise":
-        advice = generate_advice(args.symbol, capital=args.capital)
+        advice = generate_advice(args.symbol, capital=args.capital, risk_pct=args.risk_pct)
         display_advice(advice)
     elif args.action == "batch":
         symbols = [s.strip() for s in args.symbols.split(",")]
-        display_batch(symbols, capital=args.capital)
+        display_batch(symbols, capital=args.capital, risk_pct=args.risk_pct)
     elif args.action == "daily-plan":
-        display_daily_plan(capital=args.capital)
+        display_daily_plan(capital=args.capital, risk_pct=args.risk_pct)
     else:
         parser.print_help()
 
