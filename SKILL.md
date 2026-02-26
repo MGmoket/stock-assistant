@@ -15,12 +15,13 @@ requires:
 
 ## 环境准备
 
-首次使用前，需要在当前 skill 目录下创建并激活 conda 环境：
+首次使用，运行一键安装脚本：
 
 ```bash
-conda env create -f environment.yml
-conda activate stock-assistant
+bash setup.sh
 ```
+
+脚本会自动完成：安装系统依赖 (TA-Lib C 库) → 创建 conda 环境 → 验证安装。
 
 如果环境已存在，直接激活即可：
 ```bash
