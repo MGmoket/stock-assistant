@@ -46,9 +46,6 @@ python3 scripts/market_data.py top_gainers --count 10
 
 # 跌幅排行 Top 10
 python3 scripts/market_data.py top_losers --count 10
-
-# 行业板块行情
-python3 scripts/market_data.py sectors
 ```
 
 ### 2. 基本面分析 (`scripts/fundamental.py`)
@@ -114,9 +111,8 @@ python3 scripts/stock_screener.py preset --name short_term
 # 自定义条件选股
 python3 scripts/stock_screener.py custom \
   --pe-max 30 \
-  --roe-min 15 \
   --macd-golden-cross \
-  --main-capital-inflow \
+  --above-ma 20 \
   --count 10
 
 # 查看可用预设策略
@@ -126,14 +122,14 @@ python3 scripts/stock_screener.py list-presets
 ### 7. 交易策略与建议 (`scripts/trading_strategy.py`)
 
 ```bash
+# ⭐ 一键交易计划（核心命令，见第16节详细说明）
+python3 scripts/trading_strategy.py plan --capital 100000
+
 # 对指定股票生成交易建议（含仓位/止损/止盈/风险评级）
-python3 scripts/trading_strategy.py advise --symbol 600519 --capital 30000
+python3 scripts/trading_strategy.py advise --symbol 600519 --capital 100000
 
 # 对选股结果批量生成建议
-python3 scripts/trading_strategy.py batch --symbols 600519,000858,601318 --capital 30000
-
-# 生成每日交易计划
-python3 scripts/trading_strategy.py daily-plan --capital 30000
+python3 scripts/trading_strategy.py batch --symbols 600519,000858,601318 --capital 100000
 ```
 
 ### 8. 持仓管理 (`scripts/portfolio.py`)
@@ -157,7 +153,7 @@ python3 scripts/portfolio.py pnl
 
 ## 使用规范
 
-1. **始终先激活 conda 环境**再运行脚本
+1. **始终先激活 venv 环境** (`source .venv/bin/activate`) 再运行脚本
 2. **股票代码格式**：6 位数字，如 `600519`（贵州茅台）、`000858`（五粮液）
 3. 所有数据来自免费接口（Sina + pytdx 通达信），交易时段数据更新可能有延迟
 4. **交易建议仅供参考**，用户需自行判断并在东方财富手动执行交易
