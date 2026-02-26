@@ -241,13 +241,13 @@ python3 scripts/candlestick.py scan --symbol 600519 --period 60min
 
 ```bash
 # 龙头首板 — 接近涨停 + 换手合理
-python3 scripts/stock_screener.py screen --strategy leader_first_board
+python3 scripts/stock_screener.py preset --name leader_first_board
 
 # 趋势强股低吸 — 均线多头 + 回踩MA10 + K线反转
-python3 scripts/stock_screener.py screen --strategy trend_pullback
+python3 scripts/stock_screener.py preset --name trend_pullback
 
 # 冰点反转 — 仅在情绪冰点时启用
-python3 scripts/stock_screener.py screen --strategy ice_reversal
+python3 scripts/stock_screener.py preset --name ice_reversal
 ```
 
 ### 16. 一键交易计划 (`plan` — 核心命令)

@@ -87,30 +87,76 @@ PRESETS = {
 
 # ─── 选股逻辑 ────────────────────────────────────────────────────────────────────
 
+def _get_all_via_akshare_sina() -> pd.DataFrame:
+    """方案 A: AkShare stock_zh_a_spot (Sina 接口)。"""
+    df = ak.stock_zh_a_spot()
+    df["代码"] = df["代码"].astype(str).str.zfill(6)
+    col_map = {
+        "trade": "最新价", "changepercent": "涨跌幅",
+        "open": "今开", "high": "最高", "low": "最低",
+        "volume": "成交量", "amount": "成交额",
+        "turnoverratio": "换手率", "settlement": "昨收",
+        "name": "名称",
+    }
+    df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
+    return df
+
+
+def _get_all_via_sina_batch() -> pd.DataFrame:
+    """方案 B: 用 stock_info_a_code_name 获取代码列表 + sina_realtime_quote 批量获取行情。"""
+    info = ak.stock_info_a_code_name()
+    if info.empty:
+        return pd.DataFrame()
+    codes = info["code"].astype(str).str.zfill(6).tolist()
+    # 只保留主板代码（0/3/6 开头），减少请求量
+    codes = [c for c in codes if is_main_board(c)]
+    print(f"  📡 Sina 批量获取行情 ({len(codes)} 只)...")
+    df = sina_realtime_quote(codes)
+    if df.empty:
+        return pd.DataFrame()
+    df["代码"] = df["代码"].astype(str).str.zfill(6)
+    return df
+
+
+def _get_all_via_em() -> pd.DataFrame:
+    """方案 C: 东方财富 stock_zh_a_spot_em。"""
+    df = ak.stock_zh_a_spot_em()
+    if "代码" in df.columns:
+        df["代码"] = df["代码"].astype(str).str.zfill(6)
+    col_map = {
+        "最新价": "最新价", "涨跌幅": "涨跌幅",
+        "换手率": "换手率", "成交额": "成交额",
+        "名称": "名称",
+    }
+    df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
+    return df
+
+
 def get_all_stocks() -> pd.DataFrame:
-    """获取全市场实时行情数据（Sina 接口，已过滤 ST 和非主板）。"""
+    """获取全市场实时行情数据（三级降级：AkShare Sina → Sina 批量 → 东方财富）。"""
     cached = get_cache("all_stocks_spot_sina", ttl_minutes=3)
     if cached is not None:
         return pd.DataFrame(cached)
 
-    try:
-        df = ak.stock_zh_a_spot()  # Sina 接口
-        df["代码"] = df["代码"].astype(str).str.zfill(6)
-        # 统一列名
-        col_map = {
-            "trade": "最新价", "changepercent": "涨跌幅",
-            "open": "今开", "high": "最高", "low": "最低",
-            "volume": "成交量", "amount": "成交额",
-            "turnoverratio": "换手率", "settlement": "昨收",
-            "name": "名称",
-        }
-        df = df.rename(columns={k: v for k, v in col_map.items() if k in df.columns})
-        df = filter_stocks(df)
-        set_cache("all_stocks_spot_sina", df.to_dict(orient="records"))
-        return df
-    except Exception as e:
-        print(f"  ⚠️ 获取全市场数据失败: {e}")
-        return pd.DataFrame()
+    sources = [
+        ("AkShare/Sina", _get_all_via_akshare_sina),
+        ("Sina 批量", _get_all_via_sina_batch),
+        ("东方财富", _get_all_via_em),
+    ]
+
+    for name, func in sources:
+        try:
+            df = func()
+            if not df.empty and len(df) > 100:
+                df = filter_stocks(df)
+                set_cache("all_stocks_spot_sina", df.to_dict(orient="records"))
+                print(f"  ✅ 数据源: {name} ({len(df)} 只)")
+                return df
+        except Exception as e:
+            print(f"  ⚠️ {name} 失败: {e}")
+
+    print("  ❌ 所有数据源均不可用")
+    return pd.DataFrame()
 
 
 def screen_by_basic_filters(df: pd.DataFrame, filters: dict) -> pd.DataFrame:
