@@ -76,43 +76,58 @@ def _sina_symbol(code: str) -> str:
 def sina_realtime_quote(symbols: list) -> pd.DataFrame:
     """
     通过 Sina 接口获取实时行情（稳定可靠，不依赖东方财富 push2）。
-    支持批量查询，symbols 为 6 位代码列表。
+    支持批量查询，symbols 为 6 位代码列表。自动分批（每批 80 只）。
     """
     import requests
+    import time
 
-    sina_codes = [_sina_symbol(s) for s in symbols]
-    url = SINA_QUOTE_URL + ",".join(sina_codes)
-    r = requests.get(url, headers=SINA_HEADERS, timeout=10)
-    r.encoding = "gbk"
-
-    rows = []
-    for line in r.text.strip().split("\n"):
-        if "=" not in line or '""' in line:
-            continue
-        var_part, data_part = line.split("=", 1)
-        sina_code = var_part.split("_")[-1]
-        code = sina_code[2:]  # 去掉 sh/sz 前缀
-        data = data_part.strip('";\n').split(",")
-        if len(data) < 32:
-            continue
-        rows.append({
-            "代码": code,
-            "名称": data[0],
-            "今开": float(data[1]) if data[1] else 0,
-            "昨收": float(data[2]) if data[2] else 0,
-            "最新价": float(data[3]) if data[3] else 0,
-            "最高": float(data[4]) if data[4] else 0,
-            "最低": float(data[5]) if data[5] else 0,
-            "成交量": int(float(data[8])) if data[8] else 0,  # 股
-            "成交额": float(data[9]) if data[9] else 0,
-            "日期": data[30],
-            "时间": data[31],
-        })
-
-    if not rows:
+    if not symbols:
         return pd.DataFrame()
 
-    df = pd.DataFrame(rows)
+    batch_size = 80
+    all_rows = []
+
+    for i in range(0, len(symbols), batch_size):
+        batch = symbols[i:i + batch_size]
+        sina_codes = [_sina_symbol(s) for s in batch]
+        url = SINA_QUOTE_URL + ",".join(sina_codes)
+        try:
+            r = requests.get(url, headers=SINA_HEADERS, timeout=10)
+            r.encoding = "gbk"
+        except Exception:
+            continue
+
+        for line in r.text.strip().split("\n"):
+            if "=" not in line or '""' in line:
+                continue
+            var_part, data_part = line.split("=", 1)
+            sina_code = var_part.split("_")[-1]
+            code = sina_code[2:]  # 去掉 sh/sz 前缀
+            data = data_part.strip('";\\n').split(",")
+            if len(data) < 32:
+                continue
+            all_rows.append({
+                "代码": code,
+                "名称": data[0],
+                "今开": float(data[1]) if data[1] else 0,
+                "昨收": float(data[2]) if data[2] else 0,
+                "最新价": float(data[3]) if data[3] else 0,
+                "最高": float(data[4]) if data[4] else 0,
+                "最低": float(data[5]) if data[5] else 0,
+                "成交量": int(float(data[8])) if data[8] else 0,  # 股
+                "成交额": float(data[9]) if data[9] else 0,
+                "日期": data[30],
+                "时间": data[31],
+            })
+
+        # 批间短暂延迟，避免限流
+        if i + batch_size < len(symbols):
+            time.sleep(0.1)
+
+    if not all_rows:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(all_rows)
     # 计算涨跌幅
     df["涨跌额"] = df["最新价"] - df["昨收"]
     df["涨跌幅"] = df.apply(
