@@ -15,15 +15,14 @@ requires:
 
 ## 环境准备
 
-首次使用前，需要在 skill 目录下创建并激活 conda 环境：
+首次使用前，需要在当前 skill 目录下创建并激活 conda 环境：
 
 ```bash
-cd /Users/lishuzhen/Codes/Python/stock-tools/skill/stock-assistant
 conda env create -f environment.yml
 conda activate stock-assistant
 ```
 
-如果环境已存在，请先激活：
+如果环境已存在，直接激活即可：
 ```bash
 conda activate stock-assistant
 ```
