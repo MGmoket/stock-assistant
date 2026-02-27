@@ -249,7 +249,7 @@ def calc_candlestick(df: pd.DataFrame):
 
 
 def calc_score(ma: dict, macd: dict, kdj: dict, boll: dict,
-               rsi: dict, vol: dict, candles: list | None = None) -> dict:
+               rsi: dict, vol: dict, candles: list = None) -> dict:
     """
     综合技术评分（满分 100）。
     > 80: 强烈买入, 60-80: 买入, 40-60: 中性, 20-40: 卖出, < 20: 强烈卖出

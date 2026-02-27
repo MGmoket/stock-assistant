@@ -71,7 +71,7 @@ def _calc_limit_up_streak(code: str, name: str, lookback_days: int = 10) -> int:
         return 0
 
 
-def get_limit_up_height(lookback_days: int = 10, spot_df: pd.DataFrame | None = None) -> int:
+def get_limit_up_height(lookback_days: int = 10, spot_df: "pd.DataFrame" = None) -> int:
     """
     计算全市场连板高度（降级版）：
     - 仅统计今日涨停股
